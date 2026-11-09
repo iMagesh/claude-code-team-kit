@@ -1,0 +1,10 @@
+{
+  "name": "claude-code-team-kit",
+  "version": "0.1.0",
+  "description": "A reference setup for onboarding a team to Claude Code: shared context, commands, a subagent, hooks, and permissions.",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check src/cart.js"
+  }
+}
