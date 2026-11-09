@@ -1,4 +1,5 @@
 ---
+name: onboard
 description: Explain this repo to a new teammate
 allowed-tools: Read, Grep, Glob
 ---

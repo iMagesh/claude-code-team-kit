@@ -1,4 +1,5 @@
 ---
+name: test-plan
 description: Propose a test plan for a function or file before writing tests
 argument-hint: <file or function>
 allowed-tools: Read, Grep

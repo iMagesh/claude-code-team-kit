@@ -1,12 +1,19 @@
 ---
+name: review
 description: Review uncommitted changes for bugs, missing tests, and risk
-allowed-tools: Bash(git diff:*), Bash(git status), Read, Grep
+allowed-tools: Bash(git diff:*), Bash(git status:*), Bash(git ls-files:*), Read, Grep
 ---
 
 Review my uncommitted changes.
 
-Current diff:
+Working tree status:
+!`git status --short`
+
+Diff of tracked files:
 !`git diff HEAD`
+
+New (untracked) files, which the diff above does not include. Read each one:
+!`git ls-files --others --exclude-standard`
 
 Report in this order, keeping each section short:
 1. **Bugs or logic errors** (with file and line)
