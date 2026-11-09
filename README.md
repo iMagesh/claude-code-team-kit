@@ -18,6 +18,7 @@ around it.
 | `.claude/agents/security-reviewer.md` | Read-only subagent for security review |
 | `test/hooks.test.js` | Tests for the hooks: the guardrails are verified by code too |
 | `.github/workflows/ci.yml` | Runs lint and tests on every push and PR, on Node 18 to 24 |
+| `docs/ROLLOUT-GUIDE.md` | How to roll the kit out to a team: pilot, setup, daily workflow, governance |
 | `docs/RESPONSIBLE-USE.md` | Guardrails, their limits, and what not to delegate |
 | `docs/WORKSHOP.md` | A 60-minute facilitated onboarding session |
 
