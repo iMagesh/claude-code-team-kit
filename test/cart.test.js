@@ -91,3 +91,32 @@ test('removing an absent sku is a no-op; invalid sku throws', () => {
   assert.strictEqual(totalCents(cart), 1000);
   assert.throws(() => removeItem(cart, undefined), /sku/);
 });
+
+test('totals stay exact for large safe amounts', () => {
+  const cart = createCart();
+  addItem(cart, { sku: 'A', priceCents: 2 ** 52 });
+  applyCode(cart, 'SAVE10');
+  // 2**52 * 0.9 = 4053239664633446.4 -> 4053239664633446 (floats gave ...447)
+  assert.strictEqual(totalCents(cart), 4053239664633446);
+});
+
+test('rejects amounts beyond the safe integer range', () => {
+  const cart = createCart();
+  assert.throws(() => addItem(cart, { sku: 'A', priceCents: 2 ** 53 }), /priceCents/);
+  assert.throws(() => addItem(cart, { sku: 'A', priceCents: 2 ** 30, qty: 2 ** 30 }), /line total/);
+  addItem(cart, { sku: 'B', priceCents: 1, qty: 2 ** 52 });
+  assert.throws(() => addItem(cart, { sku: 'B', priceCents: 1, qty: 2 ** 52 }), /qty for sku B/);
+  assert.strictEqual(cart.items[0].qty, 2 ** 52);
+  addItem(cart, { sku: 'C', priceCents: 2 ** 52 });
+  assert.throws(() => totalCents(cart), /subtotal/);
+});
+
+test('rejects a missing options object or an invalid cart', () => {
+  assert.throws(() => addItem(createCart()), /sku/);
+  for (const bad of [undefined, null, {}, { items: 'x' }]) {
+    assert.throws(() => addItem(bad, { sku: 'A', priceCents: 1 }), /cart must be/);
+    assert.throws(() => removeItem(bad, 'A'), /cart must be/);
+    assert.throws(() => applyCode(bad, 'SAVE10'), /cart must be/);
+    assert.throws(() => totalCents(bad), /cart must be/);
+  }
+});

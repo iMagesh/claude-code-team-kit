@@ -17,7 +17,7 @@ around it.
 | `.claude/skills/` | Skills, invoked as `/review`, `/test-plan`, `/onboard`, `/pr-summary` |
 | `.claude/agents/security-reviewer.md` | Read-only subagent for security review |
 | `test/hooks.test.js` | Tests for the hooks: the guardrails are verified by code too |
-| `.github/workflows/ci.yml` | Runs lint and tests on every push and PR, on Node 18 to 24 |
+| `.github/workflows/ci.yml` | Runs lint and tests on pushes to `main` and on every PR, on Node 20 to 24 |
 | `docs/ROLLOUT-GUIDE.md` | How to roll the kit out to a team: pilot, setup, daily workflow, governance |
 | `docs/RESPONSIBLE-USE.md` | Guardrails, their limits, and what not to delegate |
 | `docs/WORKSHOP.md` | A 60-minute facilitated onboarding session |
@@ -26,7 +26,7 @@ around it.
 
 ```bash
 git clone <this repo> && cd claude-code-team-kit
-npm test          # confirm the baseline passes (Node 18+)
+npm test          # confirm the baseline passes (Node 20+)
 claude            # start Claude Code in this directory
 ```
 

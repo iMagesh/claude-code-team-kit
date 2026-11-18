@@ -15,7 +15,7 @@ The kit is a small Node.js shopping-cart library wrapped in a team-ready Claude 
 | Guardrail hooks | `.claude/hooks/` | Code that blocks risky edits and shell commands, and runs tests after edits |
 | Skills | `.claude/skills/` | Repeatable workflows: `/review`, `/test-plan`, `/onboard`, `/pr-summary` |
 | Subagent | `.claude/agents/security-reviewer.md` | A read-only second opinion on security |
-| Hook tests and CI | `test/hooks.test.js`, `.github/workflows/ci.yml` | Proof the guardrails work, on every push |
+| Hook tests and CI | `test/hooks.test.js`, `.github/workflows/ci.yml` | Proof the guardrails work, on every push to `main` and every pull request |
 | Docs | `docs/RESPONSIBLE-USE.md`, `docs/WORKSHOP.md` | Policy and limits, plus a 60-minute onboarding session |
 
 Three principles run through all of it: enforce policy with code rather than prompts, verify with tests rather than trust, and keep a human accountable for every change.
@@ -61,17 +61,17 @@ What not to do: skip the pilot, start with permissive settings and tighten later
 
 ## Setting up the kit in your repository
 
-Setup takes about an hour for one repository: copy five things, adapt two files, and prove the guardrails work before anyone uses them.
+Setup takes about an hour for one repository: copy the setup, adapt `CLAUDE.md`, `settings.json` and the test hook, and prove the guardrails work before anyone uses them.
 
-1. **Try the kit as-is first.** Clone it, run `npm test` (Node 18 or later), start `claude`, and run `/onboard`. This shows the intended behavior before you change anything.
-2. **Copy the setup into your repo:** `.claude/` (settings, hooks, skills, agents), `CLAUDE.md`, `test/hooks.test.js`, `scripts/check-syntax.js` if you want it, and the CI workflow.
+1. **Try the kit as-is first.** Clone it, run `npm test` (Node 20 or later), start `claude`, and run `/onboard`. This shows the intended behavior before you change anything.
+2. **Copy the setup into your repo:** `.claude/` (settings, hooks, skills, agents), `CLAUDE.md`, `test/hooks.test.js`, `scripts/check-syntax.js`, and the CI workflow. The workflow runs `npm run lint` and `npm test`, so it also needs the `lint` and `test` scripts from `package.json`. If your repo has no `package.json`, or you leave out `check-syntax.js`, change the workflow's `run` steps to your own lint command plus `node --test test/hooks.test.js`.
 3. **Rewrite `CLAUDE.md` for your codebase.** Replace the commands, conventions and working agreements with yours. Keep it short: one screen is better than three.
 4. **Adapt `.claude/settings.json`.**
    - `allow`: your real test, lint and build commands, plus read-only git.
    - `deny`: keep the secrets, network and push rules; add anything specific to you, such as deploy scripts or database clients.
 5. **Point the test hook at your layout.** `test-after-edit.js` runs tests only for files under `src/` and `test/`. Change the path pattern and the test command if yours differ, and raise its timeout if your suite is slow.
 6. **Run the hook tests, then add cases** for any patterns you changed. A guardrail without a test will regress silently.
-7. **Add CI** so tests and hook tests run on every push and pull request.
+7. **Add CI** so tests and hook tests run on every pull request and every push to your main branch. The kit's workflow triggers on `main`; rename the branch if yours differs, or remove the `branches` filter to run on every push.
 8. **Check `.gitignore`** includes `.claude/settings.local.json` and your secrets files.
 9. **Open a pull request** with the setup and have it reviewed like any other change.
 
@@ -105,15 +105,17 @@ The guardrails stop accidents and casual mistakes reliably, but they match text,
 | `CLAUDE.md` working agreements | Run tests, small diffs, ask when unclear, never touch secrets or push | A request, not enforcement; Claude can still get it wrong |
 | Permission `allow` / `deny` rules | Only approved commands run unprompted; secrets reads, `curl`, `wget`, `git push` and `WebFetch` are denied | Rules match command prefixes, so `git -C . push` or `cat .env` slip past them |
 | `protect-files.js` (before edits) | Blocks edits to secrets files, `.git/`, the lockfile, settings and the hooks themselves | Covers the edit tools only; shell writes are the next layer's job |
-| `guard-bash.js` (before shell commands) | Blocks commands that touch secrets, push, use network tools, or write to settings and hooks | Pattern matching: obfuscated commands can evade it, and it blocks some harmless ones |
+| `guard-bash.js` (before shell commands) | Blocks commands that touch secrets, push, use network tools, or write to settings and hooks | Pattern matching: obfuscated commands, or writes through a script or tool it does not recognize, can evade it, and it blocks some harmless ones |
 | `test-after-edit.js` (after edits) | Runs the tests after each source or test edit and feeds failures back | Only as good as your tests |
-| CI | Lint, tests and hook tests on every push and PR, Node 18 to 24 | Runs after the fact, not during the session |
+| CI | Lint, tests and hook tests on pushes to `main` and on every PR, Node 20 to 24 | Runs after the fact, not during the session; a feature branch with no PR is not checked |
 | Human review | Every change read and approved by a person | Depends on people actually reading the diff |
 | Sandbox (optional) | OS-level limits on files and network | Must be switched on deliberately; not every platform supports it |
 
 **Expected false positives.** `guard-bash.js` will block `git log --grep push`, any command that mentions a secrets file, and commit messages or scripts containing a network tool's name. That is deliberate: the cost of a false block is a manual command; the cost of a missed one could be a leaked secret.
 
-**Hooks fail open** on malformed input so a broken hook never freezes a session. Permissions still apply in that case.
+**Hooks fail open** on malformed input so a broken hook never freezes a session. Permissions still apply in that case. Only exit code 2 blocks, so a hook that crashes (for example after a bad edit to its pattern lists) also lets everything through. Run the hook tests after every hook change.
+
+**Skills and subagents are not protected.** The hooks guard settings and the hooks themselves, not `.claude/skills/` or `.claude/agents/`, so Claude can edit a skill's `allowed-tools`. Catch that in review: add a `CODEOWNERS` entry that makes the kit owner review changes under `.claude/`.
 
 **Personal settings can loosen rules.** `.claude/settings.local.json` is per developer and not committed. The hooks stop Claude from editing it, but a person can still widen access there. If that is not acceptable, use managed settings.
 
@@ -136,8 +138,9 @@ Change `CLAUDE.md` freely and often; change permissions and hooks rarely, delibe
 
 **Hooks: extend the pattern lists, not the logic.**
 
-- Add your own sensitive paths to `PROTECTED` in `protect-files.js`, such as `infra/prod/` or `*.pem`.
-- Add your own risky commands to `RULES` in `guard-bash.js`, such as `kubectl`, `terraform apply` or `psql`.
+- Add your own sensitive paths to `PROTECTED` in `protect-files.js`. Each entry must be a regular expression, not a string or glob: for example `/(^|\/)infra\/prod\//` or `/\.pem$/`.
+- Add your own risky commands to `RULES` in `guard-bash.js`. Each entry must be an object with a `test` function and a `why` message, for example `{ test: (c) => /\b(kubectl|psql)\b|\bterraform\s+apply\b/.test(c), why: 'runs an infrastructure or database tool' }`.
+- A wrong entry shape makes the hook throw. A crashing hook exits with code 1, which does not block, so every guardrail in that file silently stops working. The hook tests catch this.
 - Add a block case and an allow case to `test/hooks.test.js` for every pattern you add.
 
 **Skills: capture what you repeat.** Good candidates are tasks a senior engineer explains more than twice a month. Examples: "add a database migration", "add an API endpoint with tests", "triage a flaky test". Create `.claude/skills/<name>/SKILL.md` with a clear `description` so Claude can also pick it up on its own, and limit its `allowed-tools` to what the task needs.
@@ -208,14 +211,14 @@ Most problems come from three places: a hook pattern that is too broad, a slow t
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | A harmless command is blocked: "uses a network tool" | A tool name such as `wget` appears in the text, for example in a commit message | Put the text in a file (`git commit -F msg.txt`) or run the command yourself with `!`; log it |
-| "may modify Claude Code settings or hooks" on a read | A write operator and a settings path in the same command segment | Split the command; if it is a pattern bug, fix it by hand with a test |
+| "may modify Claude Code settings or hooks" on a read | A write operator (including a redirect such as `2>/dev/null`) and a settings path in the same command segment | Drop the redirect, split the command if the write is a separate step, or run it yourself with `!`; if it is a pattern bug, fix it by hand with a test |
 | Every edit is slow | The test hook runs the full suite after each edit | Narrow its path pattern, run a faster subset, or raise the timeout |
 | "Tests timed out" | The suite takes longer than the hook's 90-second limit | Raise `TIMEOUT_MS` in the hook and `timeout` in `settings.json` together |
 | A hook change has no effect | Settings are read at session start | Restart Claude Code; run `/hooks` to check what is loaded |
-| Hooks fail with "node: not found" | Node is not on the PATH of the shell Claude Code uses | Install Node 18 or later, or port the hooks |
-| A skill does not appear | Wrong folder or missing frontmatter | It must be `.claude/skills/<name>/SKILL.md` with `name` and `description` |
+| Hooks fail with "node: not found" | Node is not on the PATH of the shell Claude Code uses | Install Node 20 or later, or port the hooks |
+| A skill does not appear | Wrong folder or malformed frontmatter | It must be `.claude/skills/<name>/SKILL.md`, with a valid YAML frontmatter block that has a `description`. `name` is optional and defaults to the folder name. Restart Claude Code after adding it |
 
-**Can Claude edit the guardrails if I ask?** No. Both hooks block it, by design. Make guardrail changes by hand, with a reviewed PR.
+**Can Claude edit the guardrails if I ask?** The hooks block the common ways: the edit tools, and shell writes such as redirects, `sed -i`, `cp` and `rm`. They match text, so an obfuscated command, or a write through a script or tool the patterns do not recognize, can still get through. Treat them as a guard against accidents, not a lock. Make guardrail changes by hand, with a reviewed PR, and use the sandbox or managed settings where a bypass would matter.
 
 **Is this enough for regulated code or production data?** No. Add the sandbox, managed settings, and your security team's review. The kit's own docs say not to give Claude real credentials or production data.
 
