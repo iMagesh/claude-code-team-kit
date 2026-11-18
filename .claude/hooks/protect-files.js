@@ -4,6 +4,10 @@
 // Exit code 2 blocks the tool call and feeds stderr back to Claude.
 // Shell-level writes are covered separately by guard-bash.js.
 
+const path = require('node:path');
+
+// Patterns are lowercase: paths are lowercased before matching, because macOS and
+// Windows filesystems usually ignore case (`.Claude/Settings.json` is the same file).
 const PROTECTED = [
   /(^|\/)\.env(\.|$)/, // secrets, at any depth
   /(^|\/)\.git\//, // repository internals
@@ -11,6 +15,11 @@ const PROTECTED = [
   /(^|\/)\.claude\/settings(\.local)?\.json$/, // permissions and hook wiring
   /(^|\/)\.claude\/hooks\//, // the guardrails themselves
 ];
+
+// Collapse `//`, `/./` and `..` so equivalent spellings of a path match the same pattern.
+function normalize(filePath) {
+  return path.posix.normalize(filePath.replace(/\\/g, '/')).toLowerCase();
+}
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
@@ -24,7 +33,7 @@ process.stdin.on('end', () => {
     process.exit(0); // fail open on malformed input; permissions still apply
   }
 
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = normalize(filePath);
   if (PROTECTED.some((p) => p.test(normalized))) {
     process.stderr.write(
       `Blocked: ${filePath} is protected. Ask the user to change it manually.\n`

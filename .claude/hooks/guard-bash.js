@@ -6,23 +6,58 @@
 // It is still best-effort (a determined script can obfuscate a command);
 // use Claude Code's sandbox for hard network/filesystem isolation.
 // Exit code 2 blocks the tool call and feeds stderr back to Claude.
+// Patterns ignore case because macOS and Windows filesystems usually do.
 
 // Claude Code settings files, the hooks directory, or the whole .claude directory.
-const CLAUDE_CONFIG = /\.claude(\/(settings[\w.-]*\.json|hooks\b)|\/?(?=$|[\s'";|&)]))/;
-// A write: redirect into a file (but not fd duplication like 2>&1), or a mutating tool.
-const WRITE_OP = />(?!&)|\btee\b|\bsed\s+-i|\b(mv|cp|rm|ln|chmod|truncate|perl)\b/;
+// Tolerates `//` and `/./` path segments, which resolve to the same file.
+const CLAUDE_CONFIG = /\.claude(\/+(\.\/+)*(settings[\w.-]*\.json|hooks\b)|\/*(?=$|[\s'";|&)]))/i;
+// A command that changes into a .claude directory, after which bare file names are config.
+const ENTERS_CLAUDE_DIR = /\b(cd|pushd)\s+[^;&|\n]*\.claude\b/i;
+// A write: redirect into a file (but not fd duplication like 2>&1), a mutating tool,
+// git's --output, or a file-writing call from an inline Node or Python script.
+const WRITE_OP = new RegExp(
+  [
+    />(?!&)/,
+    /\btee\b/,
+    /\bsed\b[^;&|\n]*\s(-[a-zA-Z]*i|--in-place)/,
+    /\b(mv|cp|rm|ln|chmod|truncate|perl|dd|install)\b/,
+    /--output\b/,
+    /\b(writeFile|appendFile|unlink|rm|rename|copyFile|truncate)(Sync)?\s*\(/,
+    /\bopen\s*\([^)]*['"][wa]\+?['"]/,
+    /\b(os\.(remove|unlink|rename|replace)|shutil\.\w+)\s*\(/,
+  ]
+    .map((r) => r.source)
+    .join('|')
+);
+const SEGMENTS = /&&|\|\||[;|\n]/;
 
 function writesClaudeConfig(cmd) {
-  // Judge each pipeline/list segment on its own, so an unrelated `2>&1` or `rm`
-  // elsewhere in the command does not count as a write to the config.
-  return cmd.split(/&&|\|\||[;|\n]/).some((seg) => CLAUDE_CONFIG.test(seg) && WRITE_OP.test(seg));
+  const segments = cmd.split(SEGMENTS);
+  // After a `cd .claude`, any write in the command may land in the config.
+  if (ENTERS_CLAUDE_DIR.test(cmd) && segments.some((seg) => WRITE_OP.test(seg))) return true;
+  // Otherwise judge each pipeline/list segment on its own, so an unrelated `2>&1`
+  // or `rm` elsewhere in the command does not count as a write to the config.
+  return segments.some((seg) => CLAUDE_CONFIG.test(seg) && WRITE_OP.test(seg));
 }
 
+const NETWORK_MODULE = /['"](node:)?(https?|http2|net|tls|dgram)['"]/;
 const RULES = [
-  { test: (c) => /(^|[\s'"=:/<>])\.env(\.[\w.-]+)?(?=$|[\s'";|&)<>/])/.test(c), why: 'touches a .env file' },
-  { test: (c) => /\bgit\b[^;&|\n]*\spush\b/.test(c), why: 'pushes to a remote' },
-  { test: (c) => /\b(curl|wget|nc|ncat|scp|sftp|rsync|ssh)\b/.test(c), why: 'uses a network tool' },
-  { test: (c) => /\bfetch\s*\(|\bhttps?\.(get|request)\s*\(/.test(c), why: 'makes a network call from a script' },
+  {
+    // Also catches globs such as `.env*` and `.env?`, which the shell expands to secrets files.
+    test: (c) => /(^|[\s'"=:/<>])\.env(\.[\w.*?[\]-]+)?(?=$|[\s'";|&)<>/*?[])/i.test(c),
+    why: 'touches a .env file',
+  },
+  { test: (c) => /\bgit\b[^;&|\n]*\spush\b/i.test(c), why: 'pushes to a remote' },
+  { test: (c) => /\bgit\b[^;&|\n]*\s--output\b/i.test(c), why: "writes git output to a file with --output" },
+  { test: (c) => /\b(curl|wget|nc|ncat|scp|sftp|rsync|ssh)\b/i.test(c), why: 'uses a network tool' },
+  {
+    test: (c) =>
+      /\bfetch\s*\(|\bhttps?\.(get|request)\s*\(|\bnet\.(connect|createConnection)\s*\(/.test(c) ||
+      new RegExp(/\b(require\s*\(\s*|from\s+|import\s*\(\s*)/.source + NETWORK_MODULE.source).test(c) ||
+      /\b(urllib\.request|http\.client|socket\.socket|requests\.(get|post|put|patch|delete))\b/.test(c) ||
+      /\bimport\s+(urllib|http\.client|socket|requests)\b/.test(c),
+    why: 'makes a network call from a script',
+  },
   { test: writesClaudeConfig, why: 'may modify Claude Code settings or hooks' },
 ];
 

@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const TIMEOUT_MS = 90_000; // keep below the hook timeout in settings.json
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024; // the 1 MiB default fails verbose suites with ENOBUFS
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
@@ -28,10 +29,20 @@ process.stdin.on('end', () => {
     encoding: 'utf8',
     shell: true,
     timeout: TIMEOUT_MS,
+    maxBuffer: MAX_OUTPUT_BYTES,
   });
 
   if (result.error && result.error.code === 'ETIMEDOUT') {
     process.stderr.write(`Tests timed out after ${TIMEOUT_MS / 1000}s while checking ${rel}.\n`);
+    process.exit(2);
+  }
+  if (result.error) {
+    // Not a test failure: the runner itself could not complete. Say so, so Claude
+    // does not "fix" working code.
+    process.stderr.write(
+      `Could not get test results after editing ${rel} (${result.error.code || result.error.message}). ` +
+        'This is not a test failure; ask the user to run `npm test`.\n'
+    );
     process.exit(2);
   }
   if (result.status !== 0) {
